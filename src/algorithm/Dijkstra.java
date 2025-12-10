@@ -245,46 +245,28 @@ public class Dijkstra implements PathFinder {
     }
 
     public static void main(String[] args) {
-        if (args.length > 0) {
-            // Test single maze from command line argument
-            String mazeFile = args[0];
-            try {
-                MazeData mazeData = new MazeData(mazeFile);
-                System.out.println("Testing: " + mazeFile);
-                System.out.println("Maze size: " + mazeData.getN() + "x" + mazeData.getM());
-                
-                List<Position> path = getShortestPath(mazeData);
-                if (!path.isEmpty()) {
-                    Map<Position, Integer> distances = dijkstra(mazeData);
-                    Position goal = path.get(path.size()-1);
-                    System.out.println("✓ Path found! Steps: " + path.size() + ", Cost: " + distances.get(goal));
-                } else {
-                    System.out.println("✗ No path found!");
-                }
-            } catch (Exception e) {
-                System.out.println("Error: " + e.getMessage());
-            }
-        } else {
-            // Default: test first few mazes
-            String[] mazeFiles = {"MAZE/m15_15.txt", "MAZE/m24_20.txt", "MAZE/m30_30.txt"};
+        if (args.length == 0) {
+            System.out.println("Usage: java algorithm.Dijkstra <maze_file>");
+            System.out.println("Example: java algorithm.Dijkstra MAZE/m15_15.txt");
+            return;
+        }
+        
+        String mazeFile = args[0];
+        try {
+            MazeData mazeData = new MazeData(mazeFile);
+            System.out.println("Testing: " + mazeFile);
+            System.out.println("Maze size: " + mazeData.getN() + "x" + mazeData.getM());
             
-            for (String mazeFile : mazeFiles) {
-                try {
-                    MazeData mazeData = new MazeData(mazeFile);
-                    System.out.println("\nTesting: " + mazeFile + " (" + mazeData.getN() + "x" + mazeData.getM() + ")");
-                    
-                    List<Position> path = getShortestPath(mazeData);
-                    if (!path.isEmpty()) {
-                        Map<Position, Integer> distances = dijkstra(mazeData);
-                        Position goal = path.get(path.size()-1);
-                        System.out.println("✓ Path found! Steps: " + path.size() + ", Cost: " + distances.get(goal));
-                    } else {
-                        System.out.println("✗ No path found!");
-                    }
-                } catch (Exception e) {
-                    System.out.println("Error: " + e.getMessage());
-                }
+            List<Position> path = getShortestPath(mazeData);
+            if (!path.isEmpty()) {
+                Map<Position, Integer> distances = dijkstra(mazeData);
+                Position goal = path.get(path.size()-1);
+                System.out.println("✓ Path found! Steps: " + path.size() + ", Cost: " + distances.get(goal));
+            } else {
+                System.out.println("✗ No path found!");
             }
+        } catch (Exception e) {
+            System.out.println("Error: " + e.getMessage());
         }
     }
 }
