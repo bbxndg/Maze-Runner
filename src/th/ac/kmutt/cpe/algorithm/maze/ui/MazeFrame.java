@@ -15,9 +15,11 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JSlider;
 import javax.swing.WindowConstants;
+import th.ac.kmutt.cpe.algorithm.maze.method.GeneticSettings;
+import th.ac.kmutt.cpe.algorithm.maze.method.SolverListener;
 import th.ac.kmutt.cpe.algorithm.maze.structure.MazeData;
 
-public class MazeFrame  extends JFrame{
+public class MazeFrame extends JFrame implements SolverListener, GeneticSettings {
     
     private int canvasWidth;
     private int canvasHeight;
@@ -70,6 +72,18 @@ public class MazeFrame  extends JFrame{
     public void render(MazeData data) {
         this.data = data;
         repaint();
+    }
+
+    /** SolverListener: repaint the maze in its current state. */
+    @Override
+    public void render() {
+        repaint();
+    }
+
+    /** SolverListener: sleep for one animation step at the current speed setting. */
+    @Override
+    public void pause() {
+        MazeUtil.pause(getDelayMs());
     }
 
     public void setControlListener(ControlListener listener) {
@@ -208,15 +222,6 @@ public class MazeFrame  extends JFrame{
         return (v instanceof Number) ? ((Number)v).intValue() : 14;
     }
 
-    // Reset GA parameter controls to their default values
-    public void resetGaParametersToDefaults() {
-        if (gaPopSpinner != null) gaPopSpinner.setValue(140);
-        if (gaGenSpinner != null) gaGenSpinner.setValue(300);
-        if (gaMutationSpinner != null) gaMutationSpinner.setValue(5.0);
-        if (gaGoalBiasSpinner != null) gaGoalBiasSpinner.setValue(80.0);
-        if (gaElitismSpinner != null) gaElitismSpinner.setValue(14);
-    }
-    
     public void paint(MazeUtil util) {
         int cw = (canvasRef != null ? canvasRef.getWidth() : canvasWidth);
         int ch = (canvasRef != null ? canvasRef.getHeight() : canvasHeight);
@@ -283,6 +288,7 @@ public class MazeFrame  extends JFrame{
         return speedSlider != null ? speedSlider.getValue() : 10;
     }
 
+    @Override
     public void updateMetrics(Integer cost, Integer steps, Integer visited, Long timeMs, String algoName) {
         if (algoName != null) {
             setTitle("Maze Solver - " + algoName);

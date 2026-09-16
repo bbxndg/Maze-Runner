@@ -6,8 +6,6 @@ import th.ac.kmutt.cpe.algorithm.maze.ui.MazeFrame;
 
 public class Main {
     private static final String FILE_NAME = "./MAZE/m15_15.txt";
-    // BLOCK_SIZE unused after fixing frame to 1920x1080
-    // private static final int BLOCK_SIZE = 10;
     MazeFrame frame;
     MazeData data;
     private Thread currentRunner;
@@ -18,11 +16,11 @@ public class Main {
     public void initFrame() {
         data = new MazeData(FILE_NAME);
         java.awt.Dimension screen = java.awt.Toolkit.getDefaultToolkit().getScreenSize();
-        frame = new MazeFrame("Maze Solver - " + getMazeLabel(), screen.width-50, screen.height-110);
+        frame = new MazeFrame("Maze Solver - " + MazeData.labelOf(data), screen.width-50, screen.height-110);
         frame.setMazeFileName(FILE_NAME);
 
         // wire shared data/frame into runner and algorithms
-        run = new Run(data, frame);
+        run = new Run(data, frame, frame);
 
         frame.setControlListener(new MazeFrame.ControlListener() {
             @Override
@@ -57,7 +55,7 @@ public class Main {
                     run.setData(newData);
                     int bs = frame.getBlockSize();
                     frame.resizeToBlock(bs);
-                    frame.setTitle("Maze Solver - " + getMazeLabel());
+                    frame.setTitle("Maze Solver - " + MazeData.labelOf(data));
                     frame.setMazeFileName(filePath);
                     resetState();
                     frame.render(data);
@@ -72,28 +70,9 @@ public class Main {
     }
 
     private void resetState() {
-        for (int i = 0; i < data.N(); i++) {
-            for (int j = 0; j < data.M(); j++) {
-                data.visited[i][j] = false;
-                data.path[i][j] = false;
-                data.result[i][j] = false;
-            }
-        }
-        frame.setTitle("Maze Solver - " + getMazeLabel());
+        data.clearSearchState();
+        frame.setTitle("Maze Solver - " + MazeData.labelOf(data));
         frame.render(data);
-    }
-
-    private String getMazeLabel() {
-        try {
-            if (data != null) {
-                String s = data.toString();
-                if (s != null && !s.trim().isEmpty()) return s;
-            }
-        } catch (Throwable ignored) {}
-        if (data != null) {
-            return data.N() + "x" + data.M();
-        }
-        return "(no maze)";
     }
 
     public static void main(String[] args) {

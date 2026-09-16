@@ -1,65 +1,52 @@
 package th.ac.kmutt.cpe.algorithm.maze.method;
+
 import th.ac.kmutt.cpe.algorithm.maze.structure.MazeData;
-import th.ac.kmutt.cpe.algorithm.maze.ui.MazeFrame;
 
+/**
+ * Picks the algorithm for a run and clears the previous search first.
+ *
+ * A fresh solver is built for every run. The algorithms keep no state between runs
+ * (all search state lives in MazeData), so this replaces the old approach of holding
+ * one instance of each solver and injecting data/frame/Position into it by hand.
+ *
+ * The listener and the genetic settings are supplied by the caller, which is what
+ * lets the same dispatch work for the Swing window and for headless tests.
+ */
 public class Run {
-    MazeData data;
-    MazeFrame frame;
-    BFS bfs = new BFS();
-    AStar aStar = new AStar();
-    Dijkstra dijkstra = new Dijkstra();
-    GeneticAlgorithm ga = new GeneticAlgorithm();
-    PureGA pga = new PureGA();
-    Position pos;
 
-    public Run(MazeData data, MazeFrame frame) {
+    private MazeData data;
+    private final SolverListener listener;
+    private final GeneticSettings geneticSettings;
+
+    public Run(MazeData data, SolverListener listener, GeneticSettings geneticSettings) {
         this.data = data;
-        this.frame = frame;
-        this.pos = new Position(0, 0, null);
-        // inject shared instances
-        bfs.data = data; bfs.frame = frame; bfs.pos = pos;
-        aStar.data = data; aStar.frame = frame; aStar.pos = pos;
-        dijkstra.data = data; dijkstra.frame = frame; dijkstra.pos = pos;
-        ga.data = data; ga.frame = frame; ga.pos = pos;
-        pga.data = data; pga.frame = frame; pga.pos = pos;
-        pos.data = data; pos.frame = frame;
+        this.listener = listener;
+        this.geneticSettings = geneticSettings;
     }
 
+    /** Point subsequent runs at a different maze (used after importing one). */
     public void setData(MazeData newData) {
         this.data = newData;
-        bfs.data = newData;
-        aStar.data = newData;
-        dijkstra.data = newData;
-        ga.data = newData;
-        pga.data = newData;
-        pos.data = newData;
     }
 
     public void runWithAlgorithm(String algo) {
-        for (int i = 0; i < data.N(); i++) {
-            for (int j = 0; j < data.M(); j++) {
-                data.visited[i][j] = false;
-                data.path[i][j] = false;
-                data.result[i][j] = false;
-            }
-        }
+        data.clearSearchState();
+        solverFor(algo).solve();
+    }
 
+    private AbstractSolver solverFor(String algo) {
         switch (algo) {
             case "BFS":
-                bfs.runBFS();
-                return;
+                return new BFS(data, listener);
             case "A*":
-                aStar.runAStar();
-                return;
+                return new AStar(data, listener);
             case "Genetic":
-                ga.runGenetic();
-                return;
+                return new GeneticAlgorithm(data, listener, geneticSettings);
             case "PureGA":
-                pga.runPureGenetic();
-                return;
+                return new PureGA(data, listener, geneticSettings);
             case "Dijkstra":
             default:
-                dijkstra.runDijkstra();
+                return new Dijkstra(data, listener);
         }
     }
 }
