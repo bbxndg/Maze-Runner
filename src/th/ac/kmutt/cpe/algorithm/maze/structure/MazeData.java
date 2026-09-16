@@ -164,6 +164,47 @@ public class MazeData {
 	public boolean inArea(int x, int y) {
 		return x >= 0 && x < N && y >=0 && y < M;
 	}
+
+	/** Clear all search markings: visited cells, the animated path and the final route. */
+	public void clearSearchState() {
+		for (int i = 0; i < N; i++) {
+			for (int j = 0; j < M; j++) {
+				visited[i][j] = false;
+				path[i][j] = false;
+				result[i][j] = false;
+			}
+		}
+	}
+
+	/** Clear only the animated path marks, leaving visited and result untouched. */
+	public void clearPathMarks() {
+		for (int i = 0; i < N; i++) {
+			for (int j = 0; j < M; j++) {
+				path[i][j] = false;
+			}
+		}
+	}
+
+	/**
+	 * Display label for a maze, used in the window title.
+	 *
+	 * NOTE: this reproduces the original behaviour on purpose. MazeData does not
+	 * override toString() and does not retain its file name, so this returns the
+	 * default Object.toString(), e.g.
+	 * "th.ac.kmutt.cpe.algorithm.maze.structure.MazeData@1b6d3586".
+	 * Keeping the file name and adding a real toString() would fix the title, but that
+	 * changes visible behaviour, so it is left to a separate change. See refactor.md.
+	 */
+	public static String labelOf(MazeData data) {
+		if (data == null) {
+			return "(no maze)";
+		}
+		String s = data.toString();
+		if (s != null && !s.trim().isEmpty()) {
+			return s;
+		}
+		return data.N() + "x" + data.M();
+	}
 	
 	public char getMazeChar(int i, int j) {
 		return maze[i][j];
