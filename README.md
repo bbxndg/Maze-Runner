@@ -54,6 +54,26 @@ rm -rf bin
 
 ---
 
+## Tests
+
+```bash
+./run-tests.sh
+```
+
+Headless tests for the solvers, with **no dependencies and no build system** — just a
+JDK. The script compiles the application plus the test into `bin-test/` and runs it with
+`-Djava.awt.headless=true`, so no display is needed. It exits non-zero if anything fails.
+
+Run it from the project root, since mazes are loaded by relative path. The suite checks
+exact result snapshots for every algorithm on every bundled maze, verifies that each
+solved route really connects the entrance to the exit, cross-checks the algorithms against
+each other, and smoke-tests the randomized `PureGA` under a time limit.
+
+The solvers only run without a display because they no longer reference the Swing window;
+see `refactor.md` for the details of that change.
+
+---
+
 ## Using the application
 
 The window opens with the maze from `MAZE/m15_15.txt` loaded (configurable — see below).
@@ -142,32 +162,45 @@ The first line contains the size as `N M`, followed by `N` lines of raw characte
 
 ```
 src/th/ac/kmutt/cpe/algorithm/maze/
-├── Main.java                 Entry point: loads the maze, builds the window,
-│                             wires up control callbacks and the solver thread
-├── structure/
-│   └── MazeData.java         Loads either file format and holds grid state:
-│                             maze, path, visited, result, weight, entrance/exit
-├── method/
-│   ├── Run.java              Clears state and dispatches to the selected algorithm
-│   ├── Dijkstra.java         Weighted Dijkstra
-│   ├── AStar.java            A* with a Manhattan heuristic
-│   ├── BFS.java              Unweighted breadth-first search
-│   ├── GeneticAlgorithm.java Goal-guided genetic algorithm
-│   ├── PureGA.java           Unguided genetic algorithm baseline
-│   ├── Node.java             Priority-queue node with a back-pointer for path rebuild
-│   └── Position.java         Grid position, path reconstruction, and step animation
+├── Main.java                    Entry point: loads the maze, builds the window,
+│                                wires up control callbacks and the solver thread
+├── structure/                   data + nodes, no UI knowledge at all
+│   ├── MazeData.java            Loads either file format and holds grid state:
+│   │                            maze, path, visited, result, weight, entrance/exit
+│   ├── PathNode.java            Interface shared by both node types: x, y, prev
+│   ├── Node.java                Priority-queue node with cost, for Dijkstra and A*
+│   └── Position.java            Plain (x, y, prev) node, for BFS and the GAs
+├── method/                      the algorithms; depends on the interfaces only
+│   ├── SolverListener.java      What a solver needs from outside: render, metrics, pause
+│   ├── GeneticSettings.java     The GA parameters, supplied by the UI
+│   ├── AbstractSolver.java      Shared: data, listener, DIRECTIONS, animateStep,
+│   │                            markPath, resetState
+│   ├── AbstractGeneticAlgorithm.java  Helpers the two GAs both need
+│   ├── Run.java                 Clears state and dispatches to the selected algorithm
+│   ├── Dijkstra.java            Weighted Dijkstra
+│   ├── AStar.java               A* with a Manhattan heuristic
+│   ├── BFS.java                 Unweighted breadth-first search
+│   ├── GeneticAlgorithm.java    Goal-guided genetic algorithm
+│   └── PureGA.java              Unguided genetic algorithm baseline
 └── ui/
-    ├── MazeFrame.java        Swing window: controls, metrics labels, canvas rendering
-    └── MazeUtil.java         Drawing helpers and the animation pause
+    ├── MazeFrame.java           Swing window: controls, metrics labels, canvas rendering.
+    │                            Implements SolverListener + GeneticSettings
+    └── MazeUtil.java            Drawing helpers and the animation pause
+
+test/th/ac/kmutt/cpe/algorithm/maze/test/
+└── SolverTest.java              Headless tests, run by ./run-tests.sh
 ```
 
 ### How a run works
 
 1. A button click on the window is forwarded to `Main` through the `MazeFrame.ControlListener` interface.
 2. `Main` disables the controls and runs the solve on a background thread so the UI stays responsive.
-3. `Run.runWithAlgorithm` clears the `visited`, `path`, and `result` grids and delegates to the chosen algorithm.
-4. The algorithm explores, animating progress through `Position.setData(...)`, which marks the cell and repaints.
-5. On success it backtracks via the nodes' `prev` pointers, marks the final route in `result`, and reports metrics to the window.
+3. `Run.runWithAlgorithm` clears the `visited`, `path`, and `result` grids, builds a solver for the chosen algorithm, and calls `solve()`.
+4. The algorithm explores, animating progress through `AbstractSolver.animateStep(...)`, which marks the cell, asks the listener to repaint, and pauses for the current speed setting.
+5. On success it backtracks via the nodes' `prev` pointers, marks the final route in `result`, and reports metrics through the listener.
+
+The solvers talk to `SolverListener` rather than to the window, which is what lets the
+tests run the same algorithms headlessly.
 
 ![Model](Model.png)
 
@@ -176,6 +209,10 @@ src/th/ac/kmutt/cpe/algorithm/maze/
 ## Known limitations
 
 - `MazeFrame.paint` draws the `S` and `G` labels using swapped row/column accessors, so on non-square mazes the goal marker may not appear. The algorithms themselves locate the entrance and exit correctly.
-- `Reset` interrupts the running thread, but the algorithms' own `cancelled` flags are never set, so an in-progress solve only stops the animation rather than terminating the search.
+- `Reset` interrupts the running thread, but that interruption is never propagated into the algorithms, so an in-progress solve is not actually terminated. (The old per-solver `cancelled` fields were removed for this reason: they were never assigned anywhere, and keeping them implied a cancellation mechanism that did not exist.)
+- `PureGA` has no generation cap before it reaches the goal, so it does not terminate on a maze with no solution.
 - Metrics are updated from the solver thread. Swing is not thread-safe, so occasional visual glitches are possible.
 - `AStar` uses a Manhattan-distance heuristic that ignores cell weights. Since weights can exceed 1, the heuristic can overestimate the remaining cost, so A\* may return a route that is not the cheapest one. `Dijkstra` on the same maze is the reliable reference for the true minimum weighted cost.
+
+See `refactor.md` for the full list of known issues, what was refactored, and what was
+deliberately left alone.
