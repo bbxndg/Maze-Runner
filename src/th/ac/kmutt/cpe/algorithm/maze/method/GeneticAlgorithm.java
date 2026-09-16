@@ -1,20 +1,31 @@
 package th.ac.kmutt.cpe.algorithm.maze.method;
 
 import th.ac.kmutt.cpe.algorithm.maze.structure.MazeData;
-import th.ac.kmutt.cpe.algorithm.maze.ui.MazeFrame;
 
-public class GeneticAlgorithm {
-    private static final int directions[][] = { { -1, 0 }, { 0, 1 }, { 1, 0 }, { 0, -1 } };
-    MazeData data;
-    MazeFrame frame;
-    Position pos;
-    private volatile boolean cancelled = false;
+/**
+ * Goal-guided genetic algorithm.
+ *
+ * A genome is a fixed-length sequence of moves. Fitness is the weighted route cost
+ * plus penalties for bad moves, and unfinished routes are additionally charged by
+ * their remaining distance to the goal. Despite the name this is a hybrid: genomes
+ * are partly seeded with goal-directed moves, individual moves are sometimes
+ * overridden using a BFS distance map, and elites/children are greedily repaired.
+ * Compare with PureGA, which deliberately has none of that guidance.
+ *
+ * The search logic here is unchanged from the original implementation.
+ */
+public class GeneticAlgorithm extends AbstractGeneticAlgorithm {
 
-    public  void runGenetic() {
+    public GeneticAlgorithm(MazeData data, SolverListener listener, GeneticSettings settings) {
+        super(data, listener, settings, "Genetic");
+    }
+
+    @Override
+    public void solve() {
         // Genetic algorithm with goal-directed bias, repair, and distance-map fitness.
         // Key fix: keep genomes aligned with their evaluation when sorting/selecting.
-        final int populationSize = Math.max(10, frame.getGaPopulation());
-        final int maxGenerations = Math.max(1, frame.getGaGenerations());
+        final int populationSize = Math.max(10, settings.getGaPopulation());
+        final int maxGenerations = Math.max(1, settings.getGaGenerations());
         int estSteps = estimateShortestSteps();
         int area = data.N() * data.M();
         double scale = area >= 2500 ? 3.0 : 1.5; // bigger mazes get longer genomes
@@ -23,8 +34,8 @@ public class GeneticAlgorithm {
             Math.min((int)Math.round(estSteps * scale), upperCap),
             data.N() + data.M()
         );
-        final double mutationRate = frame.getGaMutationRate();
-        final double goalBias = frame.getGaGoalBias();
+        final double mutationRate = settings.getGaMutationRate();
+        final double goalBias = settings.getGaGoalBias();
         final java.util.Random rnd = new java.util.Random(42);
 
         final int[][] distMap = computeDistanceMap();
@@ -45,7 +56,7 @@ public class GeneticAlgorithm {
                 if (rnd.nextDouble() < goalBias) {
                     move = chooseDirectedMove(x, y, distMap, rnd);
                 }
-                int[] d = directions[move];
+                int[] d = DIRECTIONS[move];
                 int nx = x + d[0], ny = y + d[1];
                 if (!data.inArea(nx, ny) || data.getMazeChar(nx,ny)!=MazeData.ROAD) {
                     cost += 50; // heavier penalty for invalid move
@@ -95,12 +106,11 @@ public class GeneticAlgorithm {
         int bestCost = Integer.MAX_VALUE;
         java.util.List<int[]> bestPath=null;
         boolean bestReached=false;
-        String algoName="Genetic";
         long t0 = System.nanoTime();
         int gen = 0;
         int stagnation = 0;
         // Evolve up to maxGenerations; also stops early when a goal-reaching path is found.
-        while (!cancelled && !bestReached && gen < maxGenerations) {
+        while (!bestReached && gen < maxGenerations) {
             // Evaluate with alignment
             java.util.List<Candidate> candidates = new java.util.ArrayList<>(populationSize);
             for (int[] g : pop) candidates.add(new Candidate(g, evaluate.apply(g)));
@@ -113,7 +123,7 @@ public class GeneticAlgorithm {
             });
             // Elitism
             java.util.List<int[]> next = new java.util.ArrayList<>(populationSize);
-            int eliteCount = Math.max(1, Math.min(frame.getGaElitismCount(), populationSize-1));
+            int eliteCount = Math.max(1, Math.min(settings.getGaElitismCount(), populationSize-1));
             for (int i=0;i<eliteCount;i++) {
                 int[] elite = candidates.get(i).genome.clone();
                 // Small greedy repair to help elites approach the goal if not reached
@@ -141,7 +151,7 @@ public class GeneticAlgorithm {
             if (improved) stagnation = 0; else stagnation++;
 
             // Animate occasionally to keep UI responsive
-            if (!cancelled && br.path != null && gen % 5 == 0) {
+            if (br.path != null && gen % 5 == 0) {
                 clearTransientMarks();
                 renderTravellingPath(br.path);
             }
@@ -174,7 +184,7 @@ public class GeneticAlgorithm {
             // Occasionally update UI with cost-only to avoid clutter
             if (gen % 10 == 0) {
                 Integer uiCost = (br.path != null ? computeRouteCost(br.path) : null);
-                frame.updateMetrics(uiCost, null, null, (System.nanoTime()-t0)/1_000_000L, algoName);
+                listener.updateMetrics(uiCost, null, null, (System.nanoTime()-t0)/1_000_000L, algoName);
             }
             gen++;
         }
@@ -183,39 +193,17 @@ public class GeneticAlgorithm {
         resetState();
         if (bestPath != null) {
             for (int[] cell : bestPath) {
-                if (cancelled) break;
                 int bx = cell[0], by = cell[1];
                 if (data.inArea(bx, by)) data.result[bx][by] = true;
             }
-            frame.render(data);
+            listener.render();
         }
         // Final report: show only the best route metrics
         Integer finalCost = (bestPath != null ? computeRouteCost(bestPath) : null);
         int finalSteps = (bestPath != null ? bestPath.size() : 0);
         int finalVisited = (bestPath != null ? countUnique(bestPath) : 0);
-        frame.updateMetrics(finalCost, finalSteps, finalVisited, (t1-t0)/1_000_000L, algoName);
-        if (pos != null) pos.setData(-1, -1, false);
-    }
-
-    // Helper: clear transient exploration marks used for travelling animation
-    private void clearTransientMarks() {
-        for (int i = 0; i < data.N(); i++) {
-            for (int j = 0; j < data.M(); j++) {
-                data.path[i][j] = false;
-            }
-        }
-        frame.render(data);
-    }
-
-    // Animate the current best GA candidate path as travelling steps
-    private void renderTravellingPath(java.util.List<int[]> path) {
-        for (int[] cell : path) {
-            if (cancelled) break;
-            int x = cell[0], y = cell[1];
-            pos.setData(x, y, true); // uses pause based on UI speed
-        }
-        // After travelling, keep the last travelled cells marked as path
-        frame.render(data);
+        listener.updateMetrics(finalCost, finalSteps, finalVisited, (t1-t0)/1_000_000L, algoName);
+        animateStep(-1, -1, false);
     }
 
     // Choose a move that reduces distance-to-goal (using distMap) and avoids walls.
@@ -223,8 +211,8 @@ public class GeneticAlgorithm {
         int bestMove = -1;
         int bestDist = safeGoalDistance(distMap, x, y);
         for (int m = 0; m < 4; m++) {
-            int nx = x + directions[m][0];
-            int ny = y + directions[m][1];
+            int nx = x + DIRECTIONS[m][0];
+            int ny = y + DIRECTIONS[m][1];
             if (!data.inArea(nx, ny) || data.getMazeChar(nx, ny) != MazeData.ROAD) continue;
             int d = safeGoalDistance(distMap, nx, ny);
             if (d < bestDist) {
@@ -236,8 +224,8 @@ public class GeneticAlgorithm {
         // fallback: any valid move
         java.util.ArrayList<Integer> candidates = new java.util.ArrayList<>();
         for (int m = 0; m < 4; m++) {
-            int nx = x + directions[m][0];
-            int ny = y + directions[m][1];
+            int nx = x + DIRECTIONS[m][0];
+            int ny = y + DIRECTIONS[m][1];
             if (!data.inArea(nx, ny) || data.getMazeChar(nx, ny) != MazeData.ROAD) continue;
             candidates.add(m);
         }
@@ -253,16 +241,16 @@ public class GeneticAlgorithm {
         int x = data.getEntranceX(), y = data.getEntranceY();
         for (int i = 0; i < startIdx; i++) {
             int mv = g[i] % 4;
-            int nx = x + directions[mv][0];
-            int ny = y + directions[mv][1];
+            int nx = x + DIRECTIONS[mv][0];
+            int ny = y + DIRECTIONS[mv][1];
             if (!data.inArea(nx, ny) || data.getMazeChar(nx,ny)!=MazeData.ROAD) continue;
             x = nx; y = ny;
         }
         for (int i = startIdx; i < Math.min(g.length, startIdx + segLen); i++) {
             int mv = chooseDirectedMove(x, y, distMap, rnd);
             g[i] = mv;
-            int nx = x + directions[mv][0];
-            int ny = y + directions[mv][1];
+            int nx = x + DIRECTIONS[mv][0];
+            int ny = y + DIRECTIONS[mv][1];
             if (!data.inArea(nx, ny) || data.getMazeChar(nx,ny)!=MazeData.ROAD) break;
             x = nx; y = ny;
         }
@@ -273,8 +261,8 @@ public class GeneticAlgorithm {
         int x = data.getEntranceX(), y = data.getEntranceY();
         for (int i = 0; i < genomeLength; i++) {
             int mv = g[i] % 4;
-            int nx = x + directions[mv][0];
-            int ny = y + directions[mv][1];
+            int nx = x + DIRECTIONS[mv][0];
+            int ny = y + DIRECTIONS[mv][1];
             if (!data.inArea(nx, ny) || data.getMazeChar(nx,ny)!=MazeData.ROAD) continue;
             x = nx; y = ny;
             if (x==data.getExitX() && y==data.getExitY()) return;
@@ -284,42 +272,12 @@ public class GeneticAlgorithm {
         for (int i = genomeLength - tail; i < genomeLength; i++) {
             int mv = chooseDirectedMove(x, y, distMap, rnd);
             g[i] = mv;
-            int nx = x + directions[mv][0];
-            int ny = y + directions[mv][1];
+            int nx = x + DIRECTIONS[mv][0];
+            int ny = y + DIRECTIONS[mv][1];
             if (!data.inArea(nx, ny) || data.getMazeChar(nx,ny)!=MazeData.ROAD) break;
             x = nx; y = ny;
             if (x==data.getExitX() && y==data.getExitY()) break;
         }
-    }
-
-    // Estimate shortest steps from entrance to exit using unweighted BFS (ignores weights)
-    private int estimateShortestSteps() {
-        int n = data.N(), m = data.M();
-        boolean[][] seen = new boolean[n][m];
-        java.util.ArrayDeque<Position> q = new java.util.ArrayDeque<>();
-        Position s = new Position(data.getEntranceX(), data.getEntranceY(), null);
-        q.add(s);
-        seen[s.x][s.y] = true;
-        while (!q.isEmpty()) {
-            Position cur = q.poll();
-            if (cur.x == data.getExitX() && cur.y == data.getExitY()) {
-                // count steps via backtracking
-                int steps = 0;
-                Position p = cur;
-                while (p != null) { steps++; p = p.prev; }
-                return steps;
-            }
-            for (int[] d : directions) {
-                int nx = cur.x + d[0], ny = cur.y + d[1];
-                if (data.inArea(nx, ny) && !seen[nx][ny] && data.getMazeChar(nx,ny)==MazeData.ROAD) {
-                    seen[nx][ny] = true;
-                    q.add(new Position(nx, ny, cur));
-                }
-            }
-        }
-        // fallback to Manhattan distance + padding if unreachable by BFS
-        int md = Math.abs(data.getEntranceX()-data.getExitX()) + Math.abs(data.getEntranceY()-data.getExitY());
-        return md + 20;
     }
 
     // Generate a genome that tends to move toward the goal while avoiding walls
@@ -335,8 +293,8 @@ public class GeneticAlgorithm {
                 mv = r.nextInt(4);
             }
             g[i] = mv;
-            int nx = x + directions[mv][0];
-            int ny = y + directions[mv][1];
+            int nx = x + DIRECTIONS[mv][0];
+            int ny = y + DIRECTIONS[mv][1];
             if (!data.inArea(nx, ny) || data.getMazeChar(nx,ny)!=MazeData.ROAD) continue;
             x = nx; y = ny;
             if (x==data.getExitX() && y==data.getExitY()) break;
@@ -372,7 +330,7 @@ public class GeneticAlgorithm {
             int[] cur = q.poll();
             int x = cur[0], y = cur[1];
             int cd = dist[x][y];
-            for (int[] d : directions) {
+            for (int[] d : DIRECTIONS) {
                 int nx = x + d[0], ny = y + d[1];
                 if (!data.inArea(nx, ny)) continue;
                 if (data.getMazeChar(nx, ny) != MazeData.ROAD) continue;
@@ -382,62 +340,5 @@ public class GeneticAlgorithm {
             }
         }
         return dist;
-    }
-
-    private int computeRouteCost(java.util.List<int[]> path) {
-        if (path == null || path.size() < 2) return 0;
-        int cost = 0;
-        for (int i = 1; i < path.size(); i++) {
-            int x = path.get(i)[0];
-            int y = path.get(i)[1];
-            if (!data.inArea(x, y)) continue;
-            int w = (data.weight != null ? data.weight[x][y] : 1);
-            cost += (w > 0 ? w : 1);
-        }
-        return cost;
-    }
-
-    private int countUnique(java.util.List<int[]> path) {
-        if (path == null) return 0;
-        boolean[][] seen = new boolean[data.N()][data.M()];
-        int c = 0;
-        for (int[] cell : path) {
-            int x = cell[0], y = cell[1];
-            if (!data.inArea(x, y)) continue;
-            if (!seen[x][y]) {
-                seen[x][y] = true;
-                c++;
-            }
-        }
-        return c;
-    }
-
-
-    private void resetState() {
-        for (int i = 0; i < data.N(); i++) {
-            for (int j = 0; j < data.M(); j++) {
-                data.visited[i][j] = false;
-                data.path[i][j] = false;
-                data.result[i][j] = false;
-            }
-        }
-        frame.setTitle("Maze Solver - " + getMazeLabel());
-        frame.render(data);
-    }
-
-    // Helper: returns a friendly label for the currently loaded maze (file name or size)
-    private String getMazeLabel() {
-        // Prefer original source file name via toString if MazeData exposes it
-        try {
-            if (data != null) {
-                String s = data.toString();
-                if (s != null && !s.trim().isEmpty()) return s;
-            }
-        } catch (Throwable ignored) {}
-        // Fallback to dimensions
-        if (data != null) {
-            return data.N() + "x" + data.M();
-        }
-        return "(no maze)";
     }
 }

@@ -1,29 +1,33 @@
 package th.ac.kmutt.cpe.algorithm.maze.method;
 
 import th.ac.kmutt.cpe.algorithm.maze.structure.MazeData;
-import th.ac.kmutt.cpe.algorithm.maze.ui.MazeFrame;
 
-public class PureGA {
-    private static final int directions[][] = { { -1, 0 }, { 0, 1 }, { 1, 0 }, { 0, -1 } };
-    MazeData data;
-    MazeFrame frame;
-    Position pos;
-    private volatile boolean cancelled = false;
+/**
+ * Pure genetic algorithm: travelling RANDOMLY ONLY.
+ *
+ * Deliberately has none of the guidance used by {@link GeneticAlgorithm}:
+ * no goal-directed move selection, no distance map, no repair operators.
+ * It still evolves with selection, elitism, crossover and mutation, which makes it
+ * the raw baseline the guided variant is compared against.
+ *
+ * The search logic here is unchanged from the original implementation.
+ */
+public class PureGA extends AbstractGeneticAlgorithm {
 
-    public  void runPureGenetic() {
-        // PureGA: travelling RANDOMLY ONLY.
-        // - No goal-directed move selection
-        // - No distance-map based guidance
-        // - No repair operators
-        // Still evolves with selection + elitism + crossover + mutation.
-        final int populationSize = Math.max(10, frame.getGaPopulation());
+    public PureGA(MazeData data, SolverListener listener, GeneticSettings settings) {
+        super(data, listener, settings, "PureGA");
+    }
+
+    @Override
+    public void solve() {
+        final int populationSize = Math.max(10, settings.getGaPopulation());
         // Used only as a post-solution improvement budget; before reaching goal we keep running.
-        final int improveGenerationsBudget = Math.max(1, frame.getGaGenerations());
+        final int improveGenerationsBudget = Math.max(1, settings.getGaGenerations());
         int area = data.N() * data.M();
         int estSteps = Math.max(data.N() + data.M(), estimateShortestSteps());
         // Random-only genomes need extra slack to have a chance to reach the goal.
         final int genomeLength = Math.max(estSteps * 4, Math.min(800, Math.max(200, area)));
-        final double mutationRate = frame.getGaMutationRate();
+        final double mutationRate = settings.getGaMutationRate();
         final java.util.Random rnd = new java.util.Random();
 
         // Helper to evaluate a genome
@@ -41,7 +45,7 @@ public class PureGA {
             seen[x][y] = true;
             for (int i=0;i<genome.length;i++) {
                 int move = genome[i]%4;
-                int[] d = directions[move];
+                int[] d = DIRECTIONS[move];
                 int nx = x + d[0], ny = y + d[1];
                 if (!data.inArea(nx, ny) || data.getMazeChar(nx,ny)!=MazeData.ROAD) {
                     fitness += 50; // heavier penalty for invalid move
@@ -94,13 +98,14 @@ public class PureGA {
         int bestSteps = Integer.MAX_VALUE;
         java.util.List<int[]> bestPath=null;
         boolean bestReached=false;
-        String algoName="PureGA";
         long t0 = System.nanoTime();
         int gen = 0;
         int stagnation = 0;
         int improveGen = 0;
-        // Keep running until we reach the goal (or cancelled). After reaching, try to improve a bit.
-        while (!cancelled) {
+        // Keep running until we reach the goal. After reaching, try to improve a bit.
+        // NOTE: there is no generation cap before the goal is found, so an unsolvable
+        // maze never terminates. See refactor.md.
+        while (true) {
             // Evaluate with alignment
             java.util.List<Candidate> candidates = new java.util.ArrayList<>(populationSize);
             for (int[] g : pop) candidates.add(new Candidate(g, evaluate.apply(g)));
@@ -119,7 +124,7 @@ public class PureGA {
             });
             // Elitism
             java.util.List<int[]> next = new java.util.ArrayList<>(populationSize);
-            int eliteCount = Math.max(1, Math.min(frame.getGaElitismCount(), populationSize-1));
+            int eliteCount = Math.max(1, Math.min(settings.getGaElitismCount(), populationSize-1));
             for (int i=0;i<eliteCount;i++) {
                 int[] elite = candidates.get(i).genome.clone();
                 next.add(elite);
@@ -142,7 +147,7 @@ public class PureGA {
             if (improved) stagnation = 0; else stagnation++;
 
             // Animate occasionally to keep UI responsive
-            if (!cancelled && br.path != null && gen % 5 == 0) {
+            if (br.path != null && gen % 5 == 0) {
                 clearTransientMarks();
                 renderTravellingPath(br.path);
             }
@@ -187,137 +192,16 @@ public class PureGA {
         resetState();
         if (bestReached && bestPath != null) {
             for (int[] cell : bestPath) {
-                if (cancelled) break;
                 int bx = cell[0], by = cell[1];
                 if (data.inArea(bx, by)) data.result[bx][by] = true;
             }
-            frame.render(data);
+            listener.render();
         }
         // Final report: show only the best route metrics
         Integer finalCost = (bestReached && bestPath != null ? computeRouteCost(bestPath) : null);
         Integer finalSteps = (bestReached && bestPath != null ? bestPath.size() : null);
         Integer finalVisited = (bestReached && bestPath != null ? countUnique(bestPath) : null);
-        frame.updateMetrics(finalCost, finalSteps, finalVisited, (t1-t0)/1_000_000L, algoName);
-        if (pos != null) pos.setData(-1, -1, false);
-    }
-
-    // Helper: clear transient exploration marks used for travelling animation
-    private void clearTransientMarks() {
-        for (int i = 0; i < data.N(); i++) {
-            for (int j = 0; j < data.M(); j++) {
-                data.path[i][j] = false;
-            }
-        }
-        if (frame != null) frame.render(data);
-    }
-
-    // Animate the current best GA candidate path as travelling steps
-    private void renderTravellingPath(java.util.List<int[]> path) {
-        if (pos == null) {
-            // Fall back to static painting if Position animator is not wired.
-            for (int[] cell : path) {
-                if (cancelled) break;
-                int x = cell[0], y = cell[1];
-                if (data != null && data.inArea(x, y)) data.path[x][y] = true;
-            }
-            if (frame != null) frame.render(data);
-            return;
-        }
-        for (int[] cell : path) {
-            if (cancelled) break;
-            int x = cell[0], y = cell[1];
-            pos.setData(x, y, true); // uses pause based on UI speed
-        }
-        // After travelling, keep the last travelled cells marked as path
-        if (frame != null) frame.render(data);
-    }
-
-
-    // Estimate shortest steps from entrance to exit using unweighted BFS (ignores weights)
-    private int estimateShortestSteps() {
-        int n = data.N(), m = data.M();
-        boolean[][] seen = new boolean[n][m];
-        java.util.ArrayDeque<Position> q = new java.util.ArrayDeque<>();
-        Position s = new Position(data.getEntranceX(), data.getEntranceY(), null);
-        q.add(s);
-        seen[s.x][s.y] = true;
-        while (!q.isEmpty()) {
-            Position cur = q.poll();
-            if (cur.x == data.getExitX() && cur.y == data.getExitY()) {
-                // count steps via backtracking
-                int steps = 0;
-                Position p = cur;
-                while (p != null) { steps++; p = p.prev; }
-                return steps;
-            }
-            for (int[] d : directions) {
-                int nx = cur.x + d[0], ny = cur.y + d[1];
-                if (data.inArea(nx, ny) && !seen[nx][ny] && data.getMazeChar(nx,ny)==MazeData.ROAD) {
-                    seen[nx][ny] = true;
-                    q.add(new Position(nx, ny, cur));
-                }
-            }
-        }
-        // fallback to Manhattan distance + padding if unreachable by BFS
-        int md = Math.abs(data.getEntranceX()-data.getExitX()) + Math.abs(data.getEntranceY()-data.getExitY());
-        return md + 20;
-    }
-
-
-    private int computeRouteCost(java.util.List<int[]> path) {
-        if (path == null || path.size() < 2) return 0;
-        int cost = 0;
-        for (int i = 1; i < path.size(); i++) {
-            int x = path.get(i)[0];
-            int y = path.get(i)[1];
-            if (!data.inArea(x, y)) continue;
-            int w = (data.weight != null ? data.weight[x][y] : 1);
-            cost += (w > 0 ? w : 1);
-        }
-        return cost;
-    }
-
-    private int countUnique(java.util.List<int[]> path) {
-        if (path == null) return 0;
-        boolean[][] seen = new boolean[data.N()][data.M()];
-        int c = 0;
-        for (int[] cell : path) {
-            int x = cell[0], y = cell[1];
-            if (!data.inArea(x, y)) continue;
-            if (!seen[x][y]) {
-                seen[x][y] = true;
-                c++;
-            }
-        }
-        return c;
-    }
-
-
-    private void resetState() {
-        for (int i = 0; i < data.N(); i++) {
-            for (int j = 0; j < data.M(); j++) {
-                data.visited[i][j] = false;
-                data.path[i][j] = false;
-                data.result[i][j] = false;
-            }
-        }
-        frame.setTitle("Maze Solver - " + getMazeLabel());
-        frame.render(data);
-    }
-
-    // Helper: returns a friendly label for the currently loaded maze (file name or size)
-    private String getMazeLabel() {
-        // Prefer original source file name via toString if MazeData exposes it
-        try {
-            if (data != null) {
-                String s = data.toString();
-                if (s != null && !s.trim().isEmpty()) return s;
-            }
-        } catch (Throwable ignored) {}
-        // Fallback to dimensions
-        if (data != null) {
-            return data.N() + "x" + data.M();
-        }
-        return "(no maze)";
+        listener.updateMetrics(finalCost, finalSteps, finalVisited, (t1-t0)/1_000_000L, algoName);
+        animateStep(-1, -1, false);
     }
 }
